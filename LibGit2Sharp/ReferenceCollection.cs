@@ -16,6 +16,7 @@ namespace LibGit2Sharp
     public class ReferenceCollection : IEnumerable<Reference>
     {
         internal readonly Repository repo;
+        internal readonly ReferenceDatabaseSafeHandle refDbHandle;
 
         /// <summary>
         ///   Needed for mocking purposes.
@@ -30,6 +31,9 @@ namespace LibGit2Sharp
         internal ReferenceCollection(Repository repo)
         {
             this.repo = repo;
+            refDbHandle = Proxy.git_repository_refdb(repo.Handle);
+
+            repo.RegisterForCleanup(refDbHandle);
         }
 
         /// <summary>
@@ -50,7 +54,7 @@ namespace LibGit2Sharp
         /// <returns>An <see cref = "IEnumerator{T}" /> object that can be used to iterate through the collection.</returns>
         public virtual IEnumerator<Reference> GetEnumerator()
         {
-            return Proxy.git_reference_list(repo.Handle, ReferenceType.Oid | ReferenceType.Symbolic)
+            return Proxy.git_reference_list(repo.Handle, GitReferenceType.ListAll)
                 .Select(n => this[n])
                 .GetEnumerator();
         }
@@ -225,7 +229,7 @@ namespace LibGit2Sharp
         {
             Ensure.ArgumentNotNullOrEmptyString(pattern, "pattern");
 
-            return Proxy.git_reference_foreach_glob(repo.Handle, pattern, ReferenceType.Oid | ReferenceType.Symbolic, Utf8Marshaler.FromNative)
+            return Proxy.git_reference_foreach_glob(repo.Handle, pattern, GitReferenceType.ListAll, Utf8Marshaler.FromNative)
                 .Select(n => this[n]);
         }
 
@@ -290,6 +294,17 @@ namespace LibGit2Sharp
             Ensure.ArgumentNotNull(reference, "reference");
 
             return new ReflogCollection(repo, reference.CanonicalName);
+        }
+
+        /// <summary>
+        ///   Sets the provided backend to be the reference database provider.
+        /// </summary>
+        /// <param name="backend">The backend to add</param>
+        public virtual void SetBackend(RefdbBackend backend)
+        {
+            Ensure.ArgumentNotNull(backend, "backend");
+
+            Proxy.git_refdb_set_backend(refDbHandle, backend.GitRefdbBackendPointer);
         }
     }
 }

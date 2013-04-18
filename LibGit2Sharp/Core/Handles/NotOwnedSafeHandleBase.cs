@@ -5,6 +5,11 @@ namespace LibGit2Sharp.Core.Handles
 {
     internal abstract class NotOwnedSafeHandleBase : SafeHandle
     {
+        protected NotOwnedSafeHandleBase(IntPtr handle)
+            : base(handle, false)
+        {
+        }
+
         protected NotOwnedSafeHandleBase()
             : base(IntPtr.Zero, false)
         {

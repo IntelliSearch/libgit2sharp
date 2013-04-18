@@ -1,7 +1,8 @@
 ﻿using System;
-using System.IO;
+using System.Globalization;
 using System.Runtime.InteropServices;
 using LibGit2Sharp.Core;
+using LibGit2Sharp.Core.Compat;
 using LibGit2Sharp.Core.Handles;
 
 namespace LibGit2Sharp
@@ -38,47 +39,59 @@ namespace LibGit2Sharp
         ///  Queries the backend for the given reference
         /// </summary>
         /// <param name="referenceName">Name of the reference to query</param>
-        /// <param name="type">Type of the reference returned</param>
-        /// <param name="oid">Object ID of the reference returned if type is a direct reference</param>
-        /// <param name="symbolic">Target of the reference returned if type is a symbolic reference</param>
+        /// <param name="isSymbolic">
+        ///   True if the returned reference is symbolic. False if the returned reference is direct.
+        /// </param>
+        /// <param name="oid">Object ID of the returned reference. Valued when <paramref name="isSymbolic"/> is false.</param>
+        /// <param name="symbolic">Target of the returned reference. Valued when <paramref name="isSymbolic"/> is false</param>
         /// <returns>True if the reference exists, false otherwise</returns>
-        public abstract bool Lookup(string referenceName, out ReferenceType type, out ObjectId oid, out string symbolic);
+        public abstract bool Lookup(string referenceName, out bool isSymbolic, out ObjectId oid, out string symbolic);
 
         /// <summary>
         ///  Iterates the references in this backend.
         /// </summary>
-        /// <param name="types">The types to enumerate</param>
         /// <param name="callback">The callback to execute for each reference</param>
+        /// <param name="includeSymbolicRefs">True is symbolic references should be enumerated.</param>
+        /// <param name="includeDirectRefs">True is symbolic references should be enumerated.</param>
         /// <returns>The return code from the callback</returns>
-        public abstract int Foreach(ReferenceType types, ForeachCallback callback);
+        public abstract int Foreach(ForeachCallback callback, bool includeSymbolicRefs, bool includeDirectRefs);
 
         /// <summary>
         ///  Iterates the references in this backend.
         /// </summary>
-        /// <param name="types">The types to enumerate</param>
         /// <param name="glob">The glob pattern reference names must match</param>
         /// <param name="callback">The callback to execute for each reference</param>
+        /// <param name="includeSymbolicRefs">True is symbolic references should be enumerated.</param>
+        /// <param name="includeDirectRefs">True is symbolic references should be enumerated.</param>
         /// <returns>The return code from the callback</returns>
-        public abstract int ForeachGlob(ReferenceType types, string glob, ForeachCallback callback);
+        public abstract int ForeachGlob(string glob, ForeachCallback callback, bool includeSymbolicRefs, bool includeDirectRefs);
 
         /// <summary>
         ///  The signature of the callback method provided to the reference iterators.
         /// </summary>
-        /// <param name="referenceName">The name of the reference in the backend</param>
+        /// <param name="referenceCanonicalName">The name of the reference in the backend</param>
         /// <returns>0 if enumeration should continue, any other value on error</returns>
-        public delegate int ForeachCallback(string referenceName);
-        
+        public delegate int ForeachCallback(string referenceCanonicalName);
+
         /// <summary>
-        ///  Write the given reference to the backend.
+        ///  Write the given direct reference to the backend.
         /// </summary>
-        /// <param name="reference">The reference to write</param>
-        public abstract void Write(Reference reference);
+        /// <param name="referenceCanonicalName">The reference to write</param>
+        /// <param name="target">The <see cref="ObjectId"/> of the target <see cref="GitObject"/>.</param>
+        public abstract void WriteDirectReference(string referenceCanonicalName, ObjectId target);
+
+        /// <summary>
+        ///  Write the given symbolic reference to the backend.
+        /// </summary>
+        /// <param name="referenceCanonicalName">The reference to write</param>
+        /// <param name="targetCanonicalName">The target of the symbolic reference</param>
+        public abstract void WriteSymbolicReference(string referenceCanonicalName, string targetCanonicalName);
 
         /// <summary>
         ///  Delete the given reference from the backend.
         /// </summary>
-        /// <param name="reference">The reference to delete</param>
-        public abstract void Delete(Reference reference);
+        /// <param name="referenceCanonicalName">The reference to delete</param>
+        public abstract void Delete(string referenceCanonicalName);
 
         /// <summary>
         ///  Compress the backend in an implementation-specific way.
@@ -145,33 +158,52 @@ namespace LibGit2Sharp
             public static readonly GitRefdbBackend.compress_callback CompressCallback = Compress;
             public static readonly GitRefdbBackend.free_callback FreeCallback = Free;
 
+            private static bool TryMarshalRefdbBackend(out RefdbBackend refdbBackend, IntPtr backend)
+            {
+                refdbBackend = null;
+
+                var intPtr = Marshal.ReadIntPtr(backend, GitRefdbBackend.GCHandleOffset);
+                var handle = GCHandle.FromIntPtr(intPtr).Target as RefdbBackend;
+
+                if (handle == null)
+                {
+                    Proxy.giterr_set_str(GitErrorCategory.Reference, "Cannot retrieve the RefdbBackend handle.");
+                    return false;
+                }
+
+                refdbBackend = handle;
+                return true;
+            }
+
             private static int Exists(
                 out IntPtr exists,
                 IntPtr backend,
                 IntPtr namePtr)
             {
-                RefdbBackend refdbBackend = GCHandle.FromIntPtr(Marshal.ReadIntPtr(backend, GitRefdbBackend.GCHandleOffset)).Target as RefdbBackend;
-
                 exists = (IntPtr)0;
 
-                if (refdbBackend != null)
+                RefdbBackend refdbBackend;
+                if (!TryMarshalRefdbBackend(out refdbBackend, backend))
                 {
-                    try
-                    {
-                        string referenceName = Utf8Marshaler.FromNative(namePtr);
-
-                        if (refdbBackend.Exists(referenceName))
-                            exists = (IntPtr)1;
-
-                        return 0;
-                    }
-                    catch (Exception ex)
-                    {
-                        Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
-                    }
+                    return (int)GitErrorCode.Error;
                 }
 
-                return (int)GitErrorCode.Error;
+                string referenceName = Utf8Marshaler.FromNative(namePtr);
+
+                try
+                {
+                    if (refdbBackend.Exists(referenceName))
+                    {
+                        exists = (IntPtr)1;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
+                    return (int)GitErrorCode.Error;
+                }
+
+                return (int)GitErrorCode.Ok;
             }
 
             private static int Lookup(
@@ -179,162 +211,205 @@ namespace LibGit2Sharp
                 IntPtr backend,
                 IntPtr namePtr)
             {
-                RefdbBackend refdbBackend = GCHandle.FromIntPtr(Marshal.ReadIntPtr(backend, GitRefdbBackend.GCHandleOffset)).Target as RefdbBackend;
-                ReferenceDatabaseSafeHandle refdbHandle = refdbBackend.Repository.ReferenceDatabase.Handle;
-
-                ReferenceType type;
-                ObjectId oid;
-                string symbolic;
                 referencePtr = (IntPtr)0;
 
-                if (refdbBackend != null)
+                RefdbBackend refdbBackend;
+                if (!TryMarshalRefdbBackend(out refdbBackend, backend))
                 {
-                    try
-                    {
-                        string referenceName = Utf8Marshaler.FromNative(namePtr);
-
-                        if (!refdbBackend.Lookup(referenceName, out type, out oid, out symbolic))
-                            return (int)GitErrorCode.NotFound;
-
-                        if (type == ReferenceType.Symbolic)
-                        {
-                            referencePtr = Proxy.git_reference__alloc(refdbHandle, referenceName, null, symbolic);
-                        }
-                        else
-                        {
-                            referencePtr = Proxy.git_reference__alloc(refdbHandle, referenceName, oid, null);
-                        }
-
-                        if (referencePtr != (IntPtr)0)
-                            return 0;
-                    }
-                    catch (Exception ex)
-                    {
-                        Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
-                    }
+                    return (int)GitErrorCode.Error;
                 }
 
-                return (int)GitErrorCode.Error;
+                ReferenceDatabaseSafeHandle refdbHandle = refdbBackend.Repository.Refs.refDbHandle;
+
+                string referenceName = Utf8Marshaler.FromNative(namePtr);
+
+                try
+                {
+                    bool isSymbolic;
+                    ObjectId oid;
+                    string symbolic;
+
+                    if (!refdbBackend.Lookup(referenceName, out isSymbolic, out oid, out symbolic))
+                    {
+                        return (int)GitErrorCode.NotFound;
+                    }
+
+                    Func<ObjectId, string, IntPtr> allocator =
+                        (id, target) => Proxy.git_reference__alloc(refdbHandle, referenceName, id, target);
+
+                    referencePtr = isSymbolic ?
+                        allocator(null, symbolic) :
+                        allocator(oid, null);
+                }
+                catch (Exception ex)
+                {
+                    Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
+                    return (int)GitErrorCode.Error;
+                }
+
+                return referencePtr != (IntPtr) 0 ?
+                    (int) GitErrorCode.Error : (int) GitErrorCode.Ok;
             }
 
             private static int Foreach(
                 IntPtr backend,
-                UIntPtr list_flags,
+                GitReferenceType list_flags,
                 GitRefdbBackend.foreach_callback_callback callback,
                 IntPtr data)
             {
-                RefdbBackend refdbBackend = GCHandle.FromIntPtr(Marshal.ReadIntPtr(backend, GitRefdbBackend.GCHandleOffset)).Target as RefdbBackend;
-
-                if (refdbBackend != null)
+                RefdbBackend refdbBackend;
+                if (!TryMarshalRefdbBackend(out refdbBackend, backend))
                 {
-                    try
-                    {
-                        return refdbBackend.Foreach((ReferenceType)list_flags, new ForeachState(callback, data).ManagedCallback);
-                    }
-                    catch (Exception ex)
-                    {
-                        Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
-                    }
+                    return (int)GitErrorCode.Error;
                 }
 
-                return (int)GitErrorCode.Error;
+                try
+                {
+                    bool includeSymbolicRefs = list_flags.HasFlag(GitReferenceType.Symbolic);
+                    bool includeDirectRefs = list_flags.HasFlag(GitReferenceType.Oid);
+
+                    return refdbBackend.Foreach(
+                        new ForeachState(callback, data).ManagedCallback,
+                        includeSymbolicRefs,
+                        includeDirectRefs);
+                }
+                catch (Exception ex)
+                {
+                    Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
+                    return (int)GitErrorCode.Error;
+                }
             }
 
             private static int ForeachGlob(
                 IntPtr backend,
                 IntPtr globPtr,
-                UIntPtr list_flags,
+                GitReferenceType list_flags,
                 GitRefdbBackend.foreach_callback_callback callback,
                 IntPtr data)
             {
-                RefdbBackend refdbBackend = GCHandle.FromIntPtr(Marshal.ReadIntPtr(backend, GitRefdbBackend.GCHandleOffset)).Target as RefdbBackend;
-
-                if (refdbBackend != null)
+                RefdbBackend refdbBackend;
+                if (!TryMarshalRefdbBackend(out refdbBackend, backend))
                 {
-                    try
-                    {
-                        string glob = Utf8Marshaler.FromNative(globPtr);
-                        return refdbBackend.ForeachGlob((ReferenceType)list_flags, glob, new ForeachState(callback, data).ManagedCallback);
-                    }
-                    catch (Exception ex)
-                    {
-                        Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
-                    }
+                    return (int)GitErrorCode.Error;
                 }
 
-                return (int)GitErrorCode.Error;
+                string glob = Utf8Marshaler.FromNative(globPtr);
+
+                try
+                {
+                    bool includeSymbolicRefs = list_flags.HasFlag(GitReferenceType.Symbolic);
+                    bool includeDirectRefs = list_flags.HasFlag(GitReferenceType.Oid);
+
+                    return refdbBackend.ForeachGlob(
+                        glob,
+                        new ForeachState(callback, data).ManagedCallback, includeSymbolicRefs, includeDirectRefs);
+                }
+                catch (Exception ex)
+                {
+                    Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
+                    return (int)GitErrorCode.Error;
+                }
             }
 
             private static int Write(
                 IntPtr backend,
                 IntPtr referencePtr)
             {
-                RefdbBackend refdbBackend = GCHandle.FromIntPtr(Marshal.ReadIntPtr(backend, GitRefdbBackend.GCHandleOffset)).Target as RefdbBackend;
-                ReferenceSafeHandle referenceHandle = new ReferenceSafeHandle(referencePtr, false);
-                Reference reference = Reference.BuildFromPtr<Reference>(referenceHandle, refdbBackend.Repository);
-
-                if (refdbBackend != null)
+                RefdbBackend refdbBackend;
+                if (!TryMarshalRefdbBackend(out refdbBackend, backend))
                 {
-                    try
-                    {
-                        refdbBackend.Write(reference);
-                        return 0;
-                    }
-                    catch (Exception ex)
-                    {
-                        Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
-                    }
+                    return (int)GitErrorCode.Error;
                 }
 
-                return (int)GitErrorCode.Error;
+                var referenceHandle = new NotOwnedReferenceSafeHandle(referencePtr);
+                string name = Proxy.git_reference_name(referenceHandle);
+                GitReferenceType type = Proxy.git_reference_type(referenceHandle);
+
+                try
+                {
+                    switch (type)
+                    {
+                        case GitReferenceType.Oid:
+                            ObjectId targetOid = Proxy.git_reference_target(referenceHandle);
+                            refdbBackend.WriteDirectReference(name, targetOid);
+                            break;
+
+                        case GitReferenceType.Symbolic:
+                            string targetIdentifier = Proxy.git_reference_symbolic_target(referenceHandle);
+                            refdbBackend.WriteSymbolicReference(name, targetIdentifier);
+                            break;
+
+                        default:
+                            throw new LibGit2SharpException(
+                                String.Format(CultureInfo.InvariantCulture,
+                                    "Unable to build a new reference from a type '{0}'.", type));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
+                    return (int)GitErrorCode.Error;
+                }
+
+                return (int)GitErrorCode.Ok;
             }
 
             private static int Delete(
                 IntPtr backend,
                 IntPtr referencePtr)
             {
-                RefdbBackend refdbBackend = GCHandle.FromIntPtr(Marshal.ReadIntPtr(backend, GitRefdbBackend.GCHandleOffset)).Target as RefdbBackend;
-                ReferenceSafeHandle referenceHandle = new ReferenceSafeHandle(referencePtr, false);
-                Reference reference = Reference.BuildFromPtr<Reference>(referenceHandle, refdbBackend.Repository);
-
-                if (refdbBackend != null)
+                RefdbBackend refdbBackend;
+                if (!TryMarshalRefdbBackend(out refdbBackend, backend))
                 {
-                    try
-                    {
-                        refdbBackend.Delete(reference);
-                        return 0;
-                    }
-                    catch (Exception ex)
-                    {
-                        Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
-                    }
+                    return (int)GitErrorCode.Error;
                 }
 
-                return (int)GitErrorCode.Error;
+                var referenceHandle = new NotOwnedReferenceSafeHandle(referencePtr);
+                string name = Proxy.git_reference_name(referenceHandle);
+
+                try
+                {
+                    refdbBackend.Delete(name);
+                }
+                catch (Exception ex)
+                {
+                    Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
+                    return (int)GitErrorCode.Error;
+                }
+
+                return (int)GitErrorCode.Ok;
             }
 
             private static int Compress(IntPtr backend)
             {
-                RefdbBackend refdbBackend = GCHandle.FromIntPtr(Marshal.ReadIntPtr(backend, GitRefdbBackend.GCHandleOffset)).Target as RefdbBackend;
-
-                if (refdbBackend != null)
+                RefdbBackend refdbBackend;
+                if (!TryMarshalRefdbBackend(out refdbBackend, backend))
                 {
-                    try
-                    {
-                        refdbBackend.Compress();
-                    }
-                    catch (Exception ex)
-                    {
-                        Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
-                    }
+                    return (int)GitErrorCode.Error;
                 }
 
-                return (int)GitErrorCode.Error;
+                try
+                {
+                    refdbBackend.Compress();
+                }
+                catch (Exception ex)
+                {
+                    Proxy.giterr_set_str(GitErrorCategory.Reference, ex);
+                    return (int)GitErrorCode.Error;
+                }
+
+                return (int)GitErrorCode.Ok;
             }
 
             private static void Free(IntPtr backend)
             {
-                RefdbBackend refdbBackend = GCHandle.FromIntPtr(Marshal.ReadIntPtr(backend, GitRefdbBackend.GCHandleOffset)).Target as RefdbBackend;
+                RefdbBackend refdbBackend;
+                if (!TryMarshalRefdbBackend(out refdbBackend, backend))
+                {
+                    // Really? Looks weird.
+                    return;
+                }
+
                 refdbBackend.Free();
             }
 

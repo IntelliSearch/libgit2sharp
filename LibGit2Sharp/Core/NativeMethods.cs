@@ -662,7 +662,7 @@ namespace LibGit2Sharp.Core
         internal static extern int git_reference_foreach_glob(
             RepositorySafeHandle repo,
             [MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(Utf8Marshaler))] string glob,
-            ReferenceType flags,
+            GitReferenceType flags,
             ref_glob_callback callback,
             IntPtr payload);
 
@@ -684,7 +684,14 @@ namespace LibGit2Sharp.Core
         internal static extern string git_reference_name(ReferenceSafeHandle reference);
 
         [DllImport(libgit2)]
+        [return: MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(Utf8NoCleanupMarshaler))]
+        internal static extern string git_reference_name(NotOwnedReferenceSafeHandle reference);
+
+        [DllImport(libgit2)]
         internal static extern OidSafeHandle git_reference_target(ReferenceSafeHandle reference);
+
+        [DllImport(libgit2)]
+        internal static extern OidSafeHandle git_reference_target(NotOwnedReferenceSafeHandle reference);
 
         [DllImport(libgit2)]
         internal static extern int git_reference_rename(
@@ -710,7 +717,14 @@ namespace LibGit2Sharp.Core
         internal static extern string git_reference_symbolic_target(ReferenceSafeHandle reference);
 
         [DllImport(libgit2)]
-        internal static extern ReferenceType git_reference_type(ReferenceSafeHandle reference);
+        [return: MarshalAs(UnmanagedType.CustomMarshaler, MarshalTypeRef = typeof(Utf8NoCleanupMarshaler))]
+        internal static extern string git_reference_symbolic_target(NotOwnedReferenceSafeHandle reference);
+
+        [DllImport(libgit2)]
+        internal static extern GitReferenceType git_reference_type(ReferenceSafeHandle reference);
+
+        [DllImport(libgit2)]
+        internal static extern GitReferenceType git_reference_type(NotOwnedReferenceSafeHandle reference);
 
         [DllImport(libgit2)]
         internal static extern void git_reflog_free(

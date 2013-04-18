@@ -21,12 +21,7 @@ namespace LibGit2Sharp.Core.Handles
         private int registered;
 
         protected SafeHandleBase()
-            : this(IntPtr.Zero, true)
-        {
-        }
-
-        protected SafeHandleBase(IntPtr ptr, bool free)
-            : base(ptr, free)
+            : base(IntPtr.Zero, true)
         {
             NativeMethods.AddHandle();
             registered = 1;

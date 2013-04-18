@@ -1183,7 +1183,7 @@ namespace LibGit2Sharp.Core
         public static ICollection<TResult> git_reference_foreach_glob<TResult>(
             RepositorySafeHandle repo,
             string glob,
-            ReferenceType flags,
+            GitReferenceType flags,
             Func<IntPtr, TResult> resultSelector)
         {
             return git_foreach(resultSelector, c => NativeMethods.git_reference_foreach_glob(repo, glob, flags, (x, p) => c(x, p), IntPtr.Zero));
@@ -1202,7 +1202,7 @@ namespace LibGit2Sharp.Core
             return (res == 1);
         }
 
-        public static IList<string> git_reference_list(RepositorySafeHandle repo, ReferenceType flags)
+        public static IList<string> git_reference_list(RepositorySafeHandle repo, GitReferenceType flags)
         {
             using (ThreadAffinity())
             {
@@ -1237,7 +1237,17 @@ namespace LibGit2Sharp.Core
             return NativeMethods.git_reference_name(reference);
         }
 
+        public static string git_reference_name(NotOwnedReferenceSafeHandle reference)
+        {
+            return NativeMethods.git_reference_name(reference);
+        }
+
         public static ObjectId git_reference_target(ReferenceSafeHandle reference)
+        {
+            return NativeMethods.git_reference_target(reference).MarshalAsObjectId();
+        }
+
+        public static ObjectId git_reference_target(NotOwnedReferenceSafeHandle reference)
         {
             return NativeMethods.git_reference_target(reference).MarshalAsObjectId();
         }
@@ -1305,7 +1315,17 @@ namespace LibGit2Sharp.Core
             return NativeMethods.git_reference_symbolic_target(reference);
         }
 
-        public static ReferenceType git_reference_type(ReferenceSafeHandle reference)
+        public static string git_reference_symbolic_target(NotOwnedReferenceSafeHandle reference)
+        {
+            return NativeMethods.git_reference_symbolic_target(reference);
+        }
+
+        public static GitReferenceType git_reference_type(ReferenceSafeHandle reference)
+        {
+            return NativeMethods.git_reference_type(reference);
+        }
+
+        public static GitReferenceType git_reference_type(NotOwnedReferenceSafeHandle reference)
         {
             return NativeMethods.git_reference_type(reference);
         }

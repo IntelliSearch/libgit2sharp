@@ -37,14 +37,14 @@ namespace LibGit2Sharp
 
         internal static T BuildFromPtr<T>(ReferenceSafeHandle handle, Repository repo) where T : Reference
         {
-            ReferenceType type = Proxy.git_reference_type(handle);
+            GitReferenceType type = Proxy.git_reference_type(handle);
             string name = Proxy.git_reference_name(handle);
 
             Reference reference;
 
             switch (type)
             {
-                case ReferenceType.Symbolic:
+                case GitReferenceType.Symbolic:
                     string targetIdentifier = Proxy.git_reference_symbolic_target(handle);
 
                     using (ReferenceSafeHandle resolvedHandle = Proxy.git_reference_resolve(handle))
@@ -60,7 +60,7 @@ namespace LibGit2Sharp
                         break;
                     }
 
-                case ReferenceType.Oid:
+                case GitReferenceType.Oid:
                     ObjectId targetOid = Proxy.git_reference_target(handle);
 
                     reference = new DirectReference(name, repo, targetOid);

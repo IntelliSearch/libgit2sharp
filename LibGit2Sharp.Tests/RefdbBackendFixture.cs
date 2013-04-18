@@ -1,10 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
+﻿using System.Collections.Generic;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Text.RegularExpressions;
-using LibGit2Sharp;
 using LibGit2Sharp.Tests.TestHelpers;
 using Xunit;
 
@@ -16,10 +12,10 @@ namespace LibGit2Sharp.Tests
         public void CanWriteToRefdbBackend()
         {
             string path = CloneStandardTestRepo();
+
             using (var repository = new Repository(path))
             {
-                MockRefdbBackend backend = new MockRefdbBackend(repository);
-                repository.ReferenceDatabase.SetBackend(backend);
+                MockRefdbBackend backend = SetupBackend(repository);
 
                 repository.Refs.Add("refs/heads/newref", new ObjectId("be3563ae3f795b2b4353bcce3a527ad0a4f7f644"), true);
 
@@ -34,8 +30,7 @@ namespace LibGit2Sharp.Tests
 
             using (Repository repository = Repository.Init(scd.RootedDirectoryPath))
             {
-                MockRefdbBackend backend = new MockRefdbBackend(repository);
-                repository.ReferenceDatabase.SetBackend(backend);
+                MockRefdbBackend backend = SetupBackend(repository);
 
                 backend.References["HEAD"] = new MockRefdbReference("refs/heads/testref");
                 backend.References["refs/heads/testref"] = new MockRefdbReference(new ObjectId("be3563ae3f795b2b4353bcce3a527ad0a4f7f644"));
@@ -56,8 +51,7 @@ namespace LibGit2Sharp.Tests
 
             using (Repository repository = Repository.Init(scd.RootedDirectoryPath))
             {
-                MockRefdbBackend backend = new MockRefdbBackend(repository);
-                repository.ReferenceDatabase.SetBackend(backend);
+                MockRefdbBackend backend = SetupBackend(repository);
 
                 backend.References["HEAD"] = new MockRefdbReference("refs/heads/testref");
                 backend.References["refs/heads/testref"] = new MockRefdbReference(new ObjectId("be3563ae3f795b2b4353bcce3a527ad0a4f7f644"));
@@ -74,8 +68,7 @@ namespace LibGit2Sharp.Tests
             string path = CloneStandardTestRepo();
             using (var repository = new Repository(path))
             {
-                MockRefdbBackend backend = new MockRefdbBackend(repository);
-                repository.ReferenceDatabase.SetBackend(backend);
+                MockRefdbBackend backend = SetupBackend(repository);
 
                 repository.Refs.Add("refs/heads/newref", new ObjectId("be3563ae3f795b2b4353bcce3a527ad0a4f7f644"), false);
 
@@ -90,8 +83,7 @@ namespace LibGit2Sharp.Tests
 
             using (Repository repository = Repository.Init(scd.RootedDirectoryPath))
             {
-                MockRefdbBackend backend = new MockRefdbBackend(repository);
-                repository.ReferenceDatabase.SetBackend(backend);
+                MockRefdbBackend backend = SetupBackend(repository);
 
                 backend.References["HEAD"] = new MockRefdbReference("refs/heads/testref");
                 backend.References["refs/heads/testref"] = new MockRefdbReference(new ObjectId("be3563ae3f795b2b4353bcce3a527ad0a4f7f644"));
@@ -108,8 +100,7 @@ namespace LibGit2Sharp.Tests
 
             using (Repository repository = Repository.Init(scd.RootedDirectoryPath))
             {
-                MockRefdbBackend backend = new MockRefdbBackend(repository);
-                repository.ReferenceDatabase.SetBackend(backend);
+                MockRefdbBackend backend = SetupBackend(repository);
 
                 backend.References["refs/tags/broken1"] = new MockRefdbReference("tags/shouldnt/be/symbolic");
                 backend.References["refs/tags/broken2"] = new MockRefdbReference("but/are/here/for/testing");
@@ -127,8 +118,7 @@ namespace LibGit2Sharp.Tests
 
             using (Repository repository = Repository.Init(scd.RootedDirectoryPath))
             {
-                MockRefdbBackend backend = new MockRefdbBackend(repository);
-                repository.ReferenceDatabase.SetBackend(backend);
+                MockRefdbBackend backend = SetupBackend(repository);
 
                 backend.References["HEAD"] = new MockRefdbReference("refs/heads/testref");
                 backend.References["refs/heads/testref"] = new MockRefdbReference(new ObjectId("be3563ae3f795b2b4353bcce3a527ad0a4f7f644"));
@@ -140,6 +130,23 @@ namespace LibGit2Sharp.Tests
         }
 
         #region MockRefdbBackend
+
+
+        /// <summary>
+        ///  Kind type of a <see cref="MockRefdbReference"/>
+        /// </summary>
+        private enum ReferenceType
+        {
+            /// <summary>
+            ///  A direct reference, the target is an object ID.
+            /// </summary>
+            Oid = 1,
+
+            /// <summary>
+            ///  A symbolic reference, the target is another reference.
+            /// </summary>
+            Symbolic = 2,
+        }
 
         private class MockRefdbReference
         {
@@ -193,7 +200,7 @@ namespace LibGit2Sharp.Tests
 
             public override bool Equals(object obj)
             {
-                MockRefdbReference other = obj as MockRefdbReference;
+                var other = obj as MockRefdbReference;
 
                 if (other == null || Type != other.Type)
                 {
@@ -204,10 +211,8 @@ namespace LibGit2Sharp.Tests
                 {
                     return Symbolic.Equals(other.Symbolic);
                 }
-                else
-                {
-                    return Oid.Equals(other.Oid);
-                }
+
+                return Oid.Equals(other.Oid);
             }
         }
 
@@ -225,25 +230,15 @@ namespace LibGit2Sharp.Tests
 
             protected override Repository Repository
             {
-                get
-                {
-                    return repository;
-                }
+                get { return repository; }
             }
 
             public SortedDictionary<string, MockRefdbReference> References
             {
-                get
-                {
-                    return references;
-                }
+                get { return references; }
             }
 
-            public bool Compressed
-            {
-                get;
-                private set;
-            }
+            public bool Compressed { get; private set; }
 
             protected override RefdbBackendOperations SupportedOperations
             {
@@ -258,31 +253,34 @@ namespace LibGit2Sharp.Tests
                 return references.ContainsKey(referenceName);
             }
 
-            public override bool Lookup(string referenceName, out ReferenceType type, out ObjectId oid, out string symbolic)
+            public override bool Lookup(string referenceName, out bool isSymbolic, out ObjectId oid, out string symbolic)
             {
                 MockRefdbReference reference = references[referenceName];
 
                 if (reference == null)
                 {
-                    type = ReferenceType.Invalid;
+                    isSymbolic = false;
                     oid = null;
                     symbolic = null;
                     return false;
                 }
 
-                type = reference.Type;
+                isSymbolic = reference.Type == ReferenceType.Symbolic;
                 oid = reference.Oid;
                 symbolic = reference.Symbolic;
                 return true;
             }
 
-            public override int Foreach(ReferenceType types, ForeachCallback callback)
+            public override int Foreach(ForeachCallback callback, bool includeSymbolicRefs, bool includeDirectRefs)
             {
                 int result = 0;
 
                 foreach (KeyValuePair<string, MockRefdbReference> kvp in references)
                 {
-                    if ((types & kvp.Value.Type) == 0)
+                    var referenceType = kvp.Value.Type;
+
+                    if ((referenceType == ReferenceType.Symbolic && !includeSymbolicRefs) ||
+                        (referenceType == ReferenceType.Oid && !includeDirectRefs))
                     {
                         continue;
                     }
@@ -296,17 +294,20 @@ namespace LibGit2Sharp.Tests
                 return result;
             }
 
-            public override int ForeachGlob(ReferenceType types, string glob, ForeachCallback callback)
+            public override int ForeachGlob(string glob, ForeachCallback callback, bool includeSymbolicRefs, bool includeDirectRefs)
             {
                 int result = 0;
 
-                Regex globRegex = new Regex("^" +
+                var globRegex = new Regex("^" +
                     Regex.Escape(glob).Replace(@"\*", ".*").Replace(@"\?", ".") +
                     "$");
 
                 foreach (KeyValuePair<string, MockRefdbReference> kvp in references)
                 {
-                    if ((types & kvp.Value.Type) == 0)
+                    var referenceType = kvp.Value.Type;
+
+                    if ((referenceType == ReferenceType.Symbolic && !includeSymbolicRefs) ||
+                        (referenceType == ReferenceType.Oid && !includeDirectRefs))
                     {
                         continue;
                     }
@@ -325,25 +326,21 @@ namespace LibGit2Sharp.Tests
                 return result;
             }
 
-            public override void Write(Reference reference)
+            public override void WriteDirectReference(string referenceCanonicalName, ObjectId target)
             {
-                MockRefdbReference storage;
-
-                if (reference is SymbolicReference)
-                {
-                    storage = new MockRefdbReference(((SymbolicReference)reference).TargetIdentifier);
-                }
-                else
-                {
-                    storage = new MockRefdbReference(((DirectReference)reference).Target.Id);
-                }
-
-                references.Add(reference.CanonicalName, storage);
+                var storage = new MockRefdbReference(target);
+                references.Add(referenceCanonicalName, storage);
             }
 
-            public override void Delete(Reference reference)
+            public override void WriteSymbolicReference(string referenceCanonicalName, string targetCanonicalName)
             {
-                references.Remove(reference.CanonicalName);
+                var storage = new MockRefdbReference(targetCanonicalName);
+                references.Add(referenceCanonicalName, storage);
+            }
+
+            public override void Delete(string referenceCanonicalName)
+            {
+                references.Remove(referenceCanonicalName);
             }
 
             public override void Compress()
@@ -358,5 +355,13 @@ namespace LibGit2Sharp.Tests
         }
 
         #endregion
+
+        private static MockRefdbBackend SetupBackend(Repository repository)
+        {
+            var backend = new MockRefdbBackend(repository);
+            repository.Refs.SetBackend(backend);
+
+            return backend;
+        }
     }
 }

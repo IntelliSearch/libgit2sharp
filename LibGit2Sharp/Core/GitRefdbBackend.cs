@@ -66,7 +66,7 @@ namespace LibGit2Sharp.Core
         /// <returns>0 if successful; GIT_EUSER or an error code otherwise.</returns>
         public delegate int foreach_callback(
             IntPtr backend,
-            UIntPtr list_flags,
+            GitReferenceType list_flags,
             foreach_callback_callback cb,
             IntPtr data);
 
@@ -82,7 +82,7 @@ namespace LibGit2Sharp.Core
         public delegate int foreach_glob_callback(
             IntPtr backend,
             IntPtr glob,
-            UIntPtr list_flags,
+            GitReferenceType list_flags,
             foreach_callback_callback cb,
             IntPtr data);
 
